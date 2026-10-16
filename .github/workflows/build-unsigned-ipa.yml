@@ -10,7 +10,6 @@ jobs:
   build:
     runs-on: macos-latest
     env:
-      SCHEME: "JevJarvis"
       CONFIGURATION: "Release"
       BUILD_DIR: "build"
     steps:
@@ -26,65 +25,80 @@ jobs:
           xcodebuild -version || true
           echo "=== List root files ==="
           ls -la
-          echo "=== List workspace / project files ==="
-          ls -la *.xcworkspace 2>/dev/null || true
-          ls -la *.xcodeproj 2>/dev/null || true
-          echo "=== Show Podfile if exists ==="
-          if [ -f Podfile ]; then
-            echo "--- Podfile ---"; sed -n '1,200p' Podfile; echo "--- end Podfile ---"
+
+      - name: Detect Xcode project/workspace and scheme
+        id: detect
+        run: |
+          set -euo pipefail
+          echo "Searching for .xcworkspace and .xcodeproj (up to 6 levels)"
+          WS=$(find . -maxdepth 6 -name "*.xcworkspace" | head -n1 || true)
+          PRJ=$(find . -maxdepth 6 -name "*.xcodeproj" | head -n1 || true)
+          echo "Found workspace: $WS"
+          echo "Found project: $PRJ"
+
+          SCHEME=""
+          if [ -n "$WS" ]; then
+            echo "Using workspace: $WS"
+            # list schemes
+            SCHEMES=$(xcodebuild -workspace "$WS" -list 2>/dev/null | sed -n '/Schemes:/,/^$/p' | tail -n +2 | sed 's/^\s*//' || true)
+          elif [ -n "$PRJ" ]; then
+            echo "Using project: $PRJ"
+            SCHEMES=$(xcodebuild -project "$PRJ" -list 2>/dev/null | sed -n '/Schemes:/,/^$/p' | tail -n +2 | sed 's/^\s*//' || true)
           else
-            echo "No Podfile"
-          fi
-          echo "=== xcodebuild -list (workspace if exists, else project) ==="
-          if ls *.xcworkspace 1> /dev/null 2>&1; then
-            ws=$(ls *.xcworkspace | head -n1)
-            echo "Workspace: $ws"
-            xcodebuild -workspace "$ws" -list || true
-          elif ls *.xcodeproj 1> /dev/null 2>&1; then
-            proj=$(ls *.xcodeproj | head -n1)
-            echo "Project: $proj"
-            xcodebuild -project "$proj" -list || true
-          else
-            echo "No workspace or project found in root"
+            echo "No workspace or project found in repo"
+            SCHEMES=""
           fi
 
-      - name: Determine project type
-        id: proj
-        run: |
-          if [ -f "./Podfile" ]; then
-            echo "has_podfile=true" >> $GITHUB_OUTPUT
+          echo "Detected schemes (raw):"
+          echo "$SCHEMES"
+
+          # pick first non-empty scheme line
+          FIRST_SCHEME=$(printf "%s\n" "$SCHEMES" | sed '/^\s*$/d' | head -n1 || true)
+          if [ -n "$FIRST_SCHEME" ]; then
+            echo "Selected scheme: $FIRST_SCHEME"
+            echo "SCHEME=$FIRST_SCHEME" >> $GITHUB_ENV
+            echo "workspace=$WS" >> $GITHUB_OUTPUT
+            echo "project=$PRJ" >> $GITHUB_OUTPUT
           else
-            echo "has_podfile=false" >> $GITHUB_OUTPUT
-          fi
-          if ls *.xcworkspace 1> /dev/null 2>&1; then
-            ws=$(ls *.xcworkspace | head -n1)
-            echo "workspace=${ws}" >> $GITHUB_OUTPUT
-            echo "project=" >> $GITHUB_OUTPUT
-          elif ls *.xcodeproj 1> /dev/null 2>&1; then
-            proj=$(ls *.xcodeproj | head -n1)
-            echo "project=${proj}" >> $GITHUB_OUTPUT
-            echo "workspace=" >> $GITHUB_OUTPUT
-          else
-            echo "project=" >> $GITHUB_OUTPUT
-            echo "workspace=" >> $GITHUB_OUTPUT
+            echo "No scheme detected. Leaving SCHEME empty." >&2
+            echo "workspace=$WS" >> $GITHUB_OUTPUT
+            echo "project=$PRJ" >> $GITHUB_OUTPUT
           fi
 
       - name: Setup Ruby & CocoaPods (optional)
-        if: steps.proj.outputs.has_podfile == 'true'
+        if: ${{ steps.detect.outputs.project != '' || steps.detect.outputs.workspace != '' }}
         run: |
           brew install cocoapods || true
           gem install cocoapods -v 1.12.1 --no-document || true
 
       - name: CocoaPods install (if Podfile exists)
-        if: steps.proj.outputs.has_podfile == 'true'
+        if: ${{ steps.detect.outputs.project != '' || steps.detect.outputs.workspace != '' }}
         run: |
-          pod install --repo-update
+          if [ -f Podfile ]; then
+            pod install --repo-update
+          else
+            echo "No Podfile at repo root"
+          fi
 
       - name: Build (archive) without code signing
         run: |
           set -o pipefail
-          PROJECT="${{ steps.proj.outputs.project }}"
-          WORKSPACE="${{ steps.proj.outputs.workspace }}"
+          WORKSPACE="${{ steps.detect.outputs.workspace }}"
+          PROJECT="${{ steps.detect.outputs.project }}"
+          # Fallback: try to find again at runtime
+          if [ -z "$WORKSPACE" ] && [ -z "$PROJECT" ]; then
+            WORKSPACE=$(find . -maxdepth 6 -name "*.xcworkspace" | head -n1 || true)
+            PROJECT=$(find . -maxdepth 6 -name "*.xcodeproj" | head -n1 || true)
+          fi
+
+          echo "Final WORKSPACE: $WORKSPACE"
+          echo "Final PROJECT: $PROJECT"
+          echo "SCHEME env: ${SCHEME:-<empty>}"
+
+          if [ -z "${SCHEME:-}" ]; then
+            echo "ERROR: SCHEME not set. Cannot build without a scheme." && exit 1
+          fi
+
           if [ -n "$WORKSPACE" ]; then
             xcodebuild -workspace "$WORKSPACE" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" -sdk iphoneos \
               CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="${BUILD_DIR}" archive -archivePath "${BUILD_DIR}/${SCHEME}.xcarchive" | xcpretty || true
