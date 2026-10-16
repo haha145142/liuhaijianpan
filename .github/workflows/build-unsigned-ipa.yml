@@ -1,0 +1,119 @@
+name: Build unsigned .ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      SCHEME: "JevJarvis"
+      CONFIGURATION: "Release"
+      BUILD_DIR: "build"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diagnostics - environment and repo layout
+        run: |
+          echo "=== Swift / Xcode versions ==="
+          swift --version || true
+          xcodebuild -version || true
+          echo "=== List root files ==="
+          ls -la
+          echo "=== List workspace / project files ==="
+          ls -la *.xcworkspace 2>/dev/null || true
+          ls -la *.xcodeproj 2>/dev/null || true
+          echo "=== Show Podfile if exists ==="
+          if [ -f Podfile ]; then
+            echo "--- Podfile ---"; sed -n '1,200p' Podfile; echo "--- end Podfile ---"
+          else
+            echo "No Podfile"
+          fi
+          echo "=== xcodebuild -list (workspace if exists, else project) ==="
+          if ls *.xcworkspace 1> /dev/null 2>&1; then
+            ws=$(ls *.xcworkspace | head -n1)
+            echo "Workspace: $ws"
+            xcodebuild -workspace "$ws" -list || true
+          elif ls *.xcodeproj 1> /dev/null 2>&1; then
+            proj=$(ls *.xcodeproj | head -n1)
+            echo "Project: $proj"
+            xcodebuild -project "$proj" -list || true
+          else
+            echo "No workspace or project found in root"
+          fi
+
+      - name: Determine project type
+        id: proj
+        run: |
+          if [ -f "./Podfile" ]; then
+            echo "has_podfile=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_podfile=false" >> $GITHUB_OUTPUT
+          fi
+          if ls *.xcworkspace 1> /dev/null 2>&1; then
+            ws=$(ls *.xcworkspace | head -n1)
+            echo "workspace=${ws}" >> $GITHUB_OUTPUT
+            echo "project=" >> $GITHUB_OUTPUT
+          elif ls *.xcodeproj 1> /dev/null 2>&1; then
+            proj=$(ls *.xcodeproj | head -n1)
+            echo "project=${proj}" >> $GITHUB_OUTPUT
+            echo "workspace=" >> $GITHUB_OUTPUT
+          else
+            echo "project=" >> $GITHUB_OUTPUT
+            echo "workspace=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Ruby & CocoaPods (optional)
+        if: steps.proj.outputs.has_podfile == 'true'
+        run: |
+          brew install cocoapods || true
+          gem install cocoapods -v 1.12.1 --no-document || true
+
+      - name: CocoaPods install (if Podfile exists)
+        if: steps.proj.outputs.has_podfile == 'true'
+        run: |
+          pod install --repo-update
+
+      - name: Build (archive) without code signing
+        run: |
+          set -o pipefail
+          PROJECT="${{ steps.proj.outputs.project }}"
+          WORKSPACE="${{ steps.proj.outputs.workspace }}"
+          if [ -n "$WORKSPACE" ]; then
+            xcodebuild -workspace "$WORKSPACE" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" -sdk iphoneos \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="${BUILD_DIR}" archive -archivePath "${BUILD_DIR}/${SCHEME}.xcarchive" | xcpretty || true
+          elif [ -n "$PROJECT" ]; then
+            xcodebuild -project "$PROJECT" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" -sdk iphoneos \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="${BUILD_DIR}" archive -archivePath "${BUILD_DIR}/${SCHEME}.xcarchive" | xcpretty || true
+          else
+            echo "No Xcode project or workspace found."
+            exit 1
+          fi
+
+      - name: Create unsigned .ipa
+        run: |
+          APP_PATH=$(find "${BUILD_DIR}" -name "*.app" | head -n1)
+          if [ -z "$APP_PATH" ]; then
+            echo "App not found in ${BUILD_DIR}"
+            ls -R "${BUILD_DIR}"
+            exit 1
+          fi
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          ZIP_NAME="${SCHEME}-unsigned.zip"
+          zip -r "${ZIP_NAME}" Payload
+          mv "${ZIP_NAME}" "${SCHEME}-unsigned.ipa"
+          rm -rf Payload
+          ls -lh "${SCHEME}-unsigned.ipa"
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.SCHEME }}-unsigned.ipa"
+          path: "${{ env.SCHEME }}-unsigned.ipa"
