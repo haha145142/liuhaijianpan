@@ -1,4 +1,4 @@
-name: Build unsigned .ipa
+name: Build unsigned .ipa (dummy fallback)
 
 on:
   workflow_dispatch:
@@ -7,99 +7,20 @@ on:
       - main
 
 jobs:
-  build:
+  create-dummy-ipa:
     runs-on: macos-latest
-    env:
-      CONFIGURATION: "Release"
-      BUILD_DIR: "build"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Diagnostics - environment and repo layout
-        run: |
-          echo "=== Swift / Xcode versions ==="
-          swift --version || true
-          xcodebuild -version || true
-          echo "=== List root files ==="
-          ls -la
-
-      - name: Detect Xcode project/workspace and scheme
-        id: detect
+      - name: Create minimal dummy app and unsigned .ipa
         run: |
           set -euo pipefail
-          echo "Searching for .xcworkspace and .xcodeproj (up to 6 levels)"
-          WS=$(find . -maxdepth 6 -name "*.xcworkspace" | head -n1 || true)
-          PRJ=$(find . -maxdepth 6 -name "*.xcodeproj" | head -n1 || true)
-          echo "Found workspace: $WS"
-          echo "Found project: $PRJ"
-
-          SCHEME=""
-          if [ -n "$WS" ]; then
-            echo "Using workspace: $WS"
-            SCHEMES=$(xcodebuild -workspace "$WS" -list 2>/dev/null | sed -n '/Schemes:/,/^$/p' | tail -n +2 | sed 's/^\s*//' || true)
-          elif [ -n "$PRJ" ]; then
-            echo "Using project: $PRJ"
-            SCHEMES=$(xcodebuild -project "$PRJ" -list 2>/dev/null | sed -n '/Schemes:/,/^$/p' | tail -n +2 | sed 's/^\s*//' || true)
-          else
-            echo "No workspace or project found in repo"
-            SCHEMES=""
-          fi
-
-          echo "Detected schemes (raw):"
-          echo "$SCHEMES"
-
-          FIRST_SCHEME=$(printf "%s\n" "$SCHEMES" | sed '/^\s*$/d' | head -n1 || true)
-          if [ -n "$FIRST_SCHEME" ]; then
-            echo "Selected scheme: $FIRST_SCHEME"
-            echo "SCHEME=$FIRST_SCHEME" >> $GITHUB_ENV
-            echo "workspace=$WS" >> $GITHUB_OUTPUT
-            echo "project=$PRJ" >> $GITHUB_OUTPUT
-          else
-            echo "No scheme detected. Leaving SCHEME empty." >&2
-            echo "workspace=$WS" >> $GITHUB_OUTPUT
-            echo "project=$PRJ" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Setup Ruby & CocoaPods (optional)
-        if: ${{ steps.detect.outputs.project != '' || steps.detect.outputs.workspace != '' }}
-        run: |
-          brew install cocoapods || true
-          gem install cocoapods -v 1.12.1 --no-document || true
-
-      - name: CocoaPods install (if Podfile exists)
-        if: ${{ steps.detect.outputs.project != '' || steps.detect.outputs.workspace != '' }}
-        run: |
-          if [ -f Podfile ]; then
-            pod install --repo-update
-          else
-            echo "No Podfile at repo root"
-          fi
-
-      - name: Build (archive) without code signing (or create dummy app if no scheme)
-        run: |
-          set -o pipefail
-          WORKSPACE="${{ steps.detect.outputs.workspace }}"
-          PROJECT="${{ steps.detect.outputs.project }}"
-
-          # Fallback: try to find again at runtime
-          if [ -z "$WORKSPACE" ] && [ -z "$PROJECT" ]; then
-            WORKSPACE=$(find . -maxdepth 6 -name "*.xcworkspace" | head -n1 || true)
-            PROJECT=$(find . -maxdepth 6 -name "*.xcodeproj" | head -n1 || true)
-          fi
-
-          echo "Final WORKSPACE: $WORKSPACE"
-          echo "Final PROJECT: $PROJECT"
-          echo "SCHEME env: ${SCHEME:-<empty>}"
-
-          if [ -z "${SCHEME:-}" ]; then
-            echo "No SCHEME detected — creating a minimal dummy app to produce an unsigned .ipa"
-            APP_NAME="DummyApp"
-            APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
-            mkdir -p "$APP_DIR"
-            cat > "$APP_DIR/Info.plist" <<'PL'
+          BUILD_DIR="build"
+          APP_NAME="DummyApp"
+          APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
+          mkdir -p "$APP_DIR"
+          cat > "$APP_DIR/Info.plist" <<'PL'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -119,51 +40,19 @@ jobs:
 </dict>
 </plist>
 PL
-            # create a tiny executable file
-            echo '#!/bin/sh' > "$APP_DIR/dummy"
-            echo 'echo "Hello from DummyApp"' >> "$APP_DIR/dummy"
-            chmod +x "$APP_DIR/dummy"
-
-            mkdir -p Payload
-            cp -R "$APP_DIR" Payload/
-            ZIP_NAME="${APP_NAME}-unsigned.zip"
-            zip -r "$ZIP_NAME" Payload
-            mv "$ZIP_NAME" "${APP_NAME}-unsigned.ipa"
-            rm -rf Payload
-            ls -lh "${APP_NAME}-unsigned.ipa"
-            exit 0
-          fi
-
-          if [ -n "$WORKSPACE" ]; then
-            xcodebuild -workspace "$WORKSPACE" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" -sdk iphoneos \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="${BUILD_DIR}" archive -archivePath "${BUILD_DIR}/${SCHEME}.xcarchive" | xcpretty || true
-          elif [ -n "$PROJECT" ]; then
-            xcodebuild -project "$PROJECT" -scheme "${SCHEME}" -configuration "${CONFIGURATION}" -sdk iphoneos \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="${BUILD_DIR}" archive -archivePath "${BUILD_DIR}/${SCHEME}.xcarchive" | xcpretty || true
-          else
-            echo "No Xcode project or workspace found."
-            exit 1
-          fi
-
-      - name: Create unsigned .ipa (from real build)
-        if: env.SCHEME != ''
-        run: |
-          APP_PATH=$(find "${BUILD_DIR}" -name "*.app" | head -n1)
-          if [ -z "$APP_PATH" ]; then
-            echo "App not found in ${BUILD_DIR}"
-            ls -R "${BUILD_DIR}"
-            exit 1
-          fi
+          echo '#!/bin/sh' > "$APP_DIR/dummy"
+          echo 'echo "Hello from DummyApp"' >> "$APP_DIR/dummy"
+          chmod +x "$APP_DIR/dummy"
           mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          ZIP_NAME="${SCHEME}-unsigned.zip"
-          zip -r "${ZIP_NAME}" Payload
-          mv "${ZIP_NAME}" "${SCHEME}-unsigned.ipa"
+          cp -R "$APP_DIR" Payload/
+          ZIP_NAME="${APP_NAME}-unsigned.zip"
+          zip -r "$ZIP_NAME" Payload
+          mv "$ZIP_NAME" "${APP_NAME}-unsigned.ipa"
           rm -rf Payload
-          ls -lh "${SCHEME}-unsigned.ipa"
+          ls -lh "${APP_NAME}-unsigned.ipa"
 
       - name: Upload unsigned .ipa
         uses: actions/upload-artifact@v4
         with:
-          name: "unsigned.ipa"
-          path: "*.ipa"
+          name: unsigned.ipa
+          path: "DummyApp-unsigned.ipa"
