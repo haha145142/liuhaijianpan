@@ -1,0 +1,78 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 52;
+	objects = {
+		/* Begin PBXBuildFile section */
+		1A2B3C4D5E /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D6 /* AppDelegate.swift */; };
+		1A2B3C4D6F /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D7 /* ViewController.swift */; };
+		/* End PBXBuildFile section */
+
+		/* Begin PBXFileReference section */
+		1A2B3C4D6 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = App/JevJarvis/AppDelegate.swift; sourceTree = "<group>"; };
+		1A2B3C4D7 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ViewController.swift; path = App/JevJarvis/ViewController.swift; sourceTree = "<group>"; };
+		1A2B3C4D8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = App/JevJarvis/Info.plist; sourceTree = "<group>"; };
+		1A2B3C4D9 /* product */ = {isa = PBXFileReference; explicitFileType = "wrapper.application"; path = "JevJarvis.app"; sourceTree = "BUILT_PRODUCTS_DIR"; };
+		/* End PBXFileReference section */
+
+		/* Begin PBXGroup section */
+		1D60588E0D05DD3D006BFB54 = {
+			isa = PBXGroup;
+			children = (
+				1A2B3C4D6,
+				1A2B3C4D7,
+				1A2B3C4D8,
+			);
+			sourceTree = "<group>";
+			name = JevJarvis;
+		};
+		1D60588F0D05DD3D006BFB54 = {isa = PBXGroup; children = (); name = Products; sourceTree = "<group>"; };
+		/* End PBXGroup section */
+
+		/* Begin PBXNativeTarget section */
+		1D6058910D05DD3D006BFB54 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1D6058920D05DD3D006BFB54;
+			buildPhases = (
+				1D6058930D05DD3D006BFB54,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = JevJarvis;
+			productName = JevJarvis;
+			productReference = 1A2B3C4D9 /* product */;
+			productType = "com.apple.product-type.application";
+		};
+		/* End PBXNativeTarget section */
+
+		/* Begin PBXSourcesBuildPhase section */
+		1D6058930D05DD3D006BFB54 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (1A2B3C4D5E,1A2B3C4D6F); runOnlyForDeploymentPostprocessing = 0; };
+		/* End PBXSourcesBuildPhase section */
+
+		/* Begin PBXProject section */
+		1D6058900D05DD3D006BFB54 = {
+			isa = PBXProject;
+			attributes = {LastUpgradeCheck = 1340;};
+			buildConfigurationList = 1D6058920D05DD3D006BFB54;
+			compatibilityVersion = "Xcode 12.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			mainGroup = 1D60588E0D05DD3D006BFB54;
+			productRefGroup = 1D60588F0D05DD3D006BFB54;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1D6058910D05DD3D006BFB54,
+			);
+		};
+		/* End PBXProject section */
+
+		/* Begin XCBuildConfiguration section */
+		1D6058920D05DD3D006BFB54 = {isa = XCConfigurationList; defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; configurations = (1D6058940D05DD3D006BFB54,1D6058950D05DD3D006BFB54); };
+		1D6058940D05DD3D006BFB54 = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.jevjarvis; INFOPLIST_FILE = App/JevJarvis/Info.plist; }; name = Release; };
+		1D6058950D05DD3D006BFB54 = {isa = XCBuildConfiguration; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.jevjarvis; INFOPLIST_FILE = App/JevJarvis/Info.plist; }; name = Debug; };
+		/* End XCBuildConfiguration section */
+	};
+	rootObject = 1D6058900D05DD3D006BFB54;
+}
