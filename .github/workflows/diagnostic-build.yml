@@ -1,0 +1,184 @@
+name: Diagnostic iOS Build (verbose)
+
+on:
+  workflow_dispatch: {}
+
+env:
+  CONFIGURATION: Release
+  BUILD_DIR: build
+  SCHEME: JevJarvis
+  PROJECT_PATH: App/JevJarvis.xcodeproj
+  DERIVED_DATA: ./derived-data
+
+jobs:
+  diagnose:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tool versions & basic info
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          echo "Runner OS: $(sw_vers || true)"
+          swift --version || true
+          xcodebuild -version || true
+          uname -a || true
+
+      - name: Repo layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PWD: $(pwd)"
+          echo "Top-level files:"
+          ls -la
+          echo "App directory (if exists):"
+          ls -la App || true
+          echo "PROJECT_PATH: $PROJECT_PATH"
+          echo "SCHEME: $SCHEME"
+          echo "BUILD_DIR: $BUILD_DIR"
+          echo "DERIVED_DATA: $DERIVED_DATA"
+
+      - name: Detect workspace vs project
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ls App/*.xcworkspace >/dev/null 2>&1; then
+            PROJECT_OR_WORKSPACE=$(ls App/*.xcworkspace | head -n 1)
+            echo "USE_WORKSPACE=true" >> "$GITHUB_ENV"
+            echo "PROJECT_OR_WORKSPACE=$PROJECT_OR_WORKSPACE" >> "$GITHUB_ENV"
+            echo "Detected workspace: $PROJECT_OR_WORKSPACE"
+          else
+            echo "USE_WORKSPACE=false" >> "$GITHUB_ENV"
+            echo "PROJECT_OR_WORKSPACE=$PROJECT_PATH" >> "$GITHUB_ENV"
+            echo "Using project: $PROJECT_PATH"
+          fi
+
+      - name: Show schemes and build settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== xcodebuild -list / -showBuildSettings ==="
+          if [ "${USE_WORKSPACE:-false}" = "true" ]; then
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" -list || true
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -showBuildSettings || true
+          else
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" -list || true
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -showBuildSettings || true
+          fi
+
+      - name: Ensure directories exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BUILD_DIR"
+          mkdir -p "$DERIVED_DATA"
+          echo "Build & derived-data dirs prepared."
+
+      - name: Archive (verbose, unsigned) — capture log
+        id: archive
+        shell: bash
+        run: |
+          set +e
+          echo "Running archive (unsigned) — workspace? ${USE_WORKSPACE:-false}"
+          if [ "${USE_WORKSPACE:-false}" = "true" ]; then
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -sdk iphoneos \
+              -derivedDataPath "$DERIVED_DATA" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              BUILD_DIR="$BUILD_DIR" \
+              archive \
+              -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
+              2>&1 | tee xcodebuild.log
+            status=${PIPESTATUS[0]}
+          else
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -sdk iphoneos \
+              -derivedDataPath "$DERIVED_DATA" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              BUILD_DIR="$BUILD_DIR" \
+              archive \
+              -archivePath "$BUILD_DIR/$SCHEME.xcarchive" \
+              2>&1 | tee xcodebuild.log
+            status=${PIPESTATUS[0]}
+          fi
+          echo "xcodebuild exit status: $status"
+          echo "archive_status=$status" >> "$GITHUB_OUTPUT" || true
+          exit 0
+
+      - name: Summarize build outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Listing build dir ==="
+          ls -la "$BUILD_DIR" || true
+          echo "=== Searching for .app under build/ and derived-data ==="
+          find "$BUILD_DIR" -name "*.app" -maxdepth 6 -print || true
+          find "$DERIVED_DATA" -name "*.app" -maxdepth 6 -print || true
+          echo "=== Archive contents (if exists) ==="
+          if [ -d "$BUILD_DIR/$SCHEME.xcarchive" ]; then
+            echo "Found archive: $BUILD_DIR/$SCHEME.xcarchive"
+            ls -la "$BUILD_DIR/$SCHEME.xcarchive" || true
+          fi
+
+      - name: Create unsigned .ipa if real .app found
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find "$BUILD_DIR" -type d -name "*.app" | head -n 1 || true)
+          if [ -n "$APP_PATH" ]; then
+            echo "Creating unsigned ipa from $APP_PATH"
+            mkdir -p Payload
+            cp -R "$APP_PATH" Payload/
+            zip -r "$SCHEME-unsigned.zip" Payload
+            mv "$SCHEME-unsigned.zip" "$SCHEME-unsigned.ipa"
+            rm -rf Payload
+            echo "Created $SCHEME-unsigned.ipa"
+            ls -lh "$SCHEME-unsigned.ipa"
+          else
+            echo "No .app found in build dir. Skipping ipa creation."
+          fi
+
+      - name: Collect extra diagnostics (derived-data & build logs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== derived-data top-level ==="
+          ls -la "$DERIVED_DATA" || true
+          echo "=== Show last 200 lines of xcodebuild.log (if exists) ==="
+          if [ -f xcodebuild.log ]; then
+            tail -n 200 xcodebuild.log || true
+          else
+            echo "No xcodebuild.log found."
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-artifacts
+          path:
+            - xcodebuild.log
+            - "$SCHEME-unsigned.ipa"
+            - build-listing.tgz
+
+      - name: Print guidance note
+        if: always()
+        shell: bash
+        run: |
+          echo "If no .app was produced, the likely causes are:"
+          echo " - Wrong PROJECT_PATH / using .xcodeproj instead of .xcworkspace (or vice versa)"
+          echo " - Scheme name mismatch or scheme not shared"
+          echo " - Build errors (compiler/linker) shown earlier in xcodebuild.log"
+          echo "Download xcodebuild.log artifact and paste the last error block here; I'll analyze and produce a concrete patch."
