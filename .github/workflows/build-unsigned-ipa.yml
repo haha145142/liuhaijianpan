@@ -1,4 +1,4 @@
-name: Build unsigned .ipa (dummy fallback)
+name: Build unsigned .ipa (explicit project)
 
 on:
   workflow_dispatch:
@@ -6,53 +6,67 @@ on:
     branches:
       - main
 
+env:
+  CONFIGURATION: Release
+  BUILD_DIR: build
+  SCHEME: JevJarvis
+  PROJECT_PATH: App/JevJarvis.xcodeproj
+
 jobs:
-  create-dummy-ipa:
+  build:
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Create minimal dummy app and unsigned .ipa
+      - name: Diagnostics - environment and repo layout
         run: |
           set -euo pipefail
-          BUILD_DIR="build"
-          APP_NAME="DummyApp"
-          APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
-          mkdir -p "$APP_DIR"
-          cat > "$APP_DIR/Info.plist" <<'PL'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleIdentifier</key>
-  <string>com.example.dummy</string>
-  <key>CFBundleName</key>
-  <string>DummyApp</string>
-  <key>CFBundleExecutable</key>
-  <string>dummy</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-</dict>
-</plist>
-PL
-          echo '#!/bin/sh' > "$APP_DIR/dummy"
-          echo 'echo "Hello from DummyApp"' >> "$APP_DIR/dummy"
-          chmod +x "$APP_DIR/dummy"
+          swift --version || true
+          xcodebuild -version || true
+          echo "PWD: $(pwd)"
+          echo "Listing files (top level)"
+          ls -la
+          echo "Listing App directory"
+          ls -la App || true
+          echo "Project path: $PROJECT_PATH"
+
+      - name: xcodebuild -list
+        run: |
+          set -euo pipefail
+          echo "Running xcodebuild -list for project"
+          xcodebuild -project "$PROJECT_PATH" -list || true
+
+      - name: Archive (without code signing)
+        run: |
+          set -o pipefail
+          echo "Archiving project: $PROJECT_PATH, scheme: $SCHEME"
+          xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="$BUILD_DIR" archive -archivePath "$BUILD_DIR/$SCHEME.xcarchive" | tee xcodebuild.log
+          echo "xcodebuild exit status: $?"
+          tail -n 200 xcodebuild.log || true
+
+      - name: Create unsigned .ipa
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find "$BUILD_DIR" -name "*.app" | head -n1 || true)
+          if [ -z "$APP_PATH" ]; then
+            echo "App not found in $BUILD_DIR"
+            ls -R "$BUILD_DIR" || true
+            exit 1
+          fi
           mkdir -p Payload
-          cp -R "$APP_DIR" Payload/
-          ZIP_NAME="${APP_NAME}-unsigned.zip"
+          cp -R "$APP_PATH" Payload/
+          ZIP_NAME="$SCHEME-unsigned.zip"
           zip -r "$ZIP_NAME" Payload
-          mv "$ZIP_NAME" "${APP_NAME}-unsigned.ipa"
+          mv "$ZIP_NAME" "$SCHEME-unsigned.ipa"
           rm -rf Payload
-          ls -lh "${APP_NAME}-unsigned.ipa"
+          ls -lh "$SCHEME-unsigned.ipa"
 
       - name: Upload unsigned .ipa
         uses: actions/upload-artifact@v4
         with:
-          name: unsigned.ipa
-          path: "DummyApp-unsigned.ipa"
+          name: "${{ env.SCHEME }}-unsigned.ipa"
+          path: "${{ env.SCHEME }}-unsigned.ipa"
