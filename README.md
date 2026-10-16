@@ -11,3 +11,5 @@ Planned steps
 3. Provide integration notes and a checklist of files to modify (KeyboardViewController, Network/AI client, PromptManager, Entitlements/App Group, Info.plist).
 
 I will create the feature branch and add CI/workflow files after this initial commit.
+
+CI trigger: 2026-10-16T17:50:00Z
