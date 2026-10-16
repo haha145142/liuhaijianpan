@@ -135,5 +135,5 @@ jobs:
         with:
           name: "${{ env.SCHEME }}-unsigned.ipa"
           path:
-            - ${{ env.SCHEME }}-unsigned.ipa
-            - DummyApp-unsigned.ipa
+            - "${{ env.SCHEME }}-unsigned.ipa"
+            - "DummyApp-unsigned.ipa"
