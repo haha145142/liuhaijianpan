@@ -2,6 +2,9 @@ name: Diagnostic iOS Build (verbose)
 
 on:
   workflow_dispatch: {}
+  push:
+    branches:
+      - main
 
 env:
   CONFIGURATION: Release
