@@ -109,26 +109,8 @@ jobs:
           if [ -f "App/JevJarvis/Info.plist" ]; then
             cp -f "App/JevJarvis/Info.plist" "$APP_DIR/Info.plist" || true
           else
-            cat > "$APP_DIR/Info.plist" <<'PL'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleIdentifier</key>
-  <string>com.example.dummy</string>
-  <key>CFBundleName</key>
-  <string>DummyApp</string>
-  <key>CFBundleExecutable</key>
-  <string>dummy</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-</dict>
-</plist>
-PL
+            # Generate a minimal Info.plist using printf to avoid heredoc/YAML parsing issues
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>CFBundleIdentifier</key>' '  <string>com.example.dummy</string>' '  <key>CFBundleName</key>' '  <string>DummyApp</string>' '  <key>CFBundleExecutable</key>' '  <string>dummy</string>' '  <key>CFBundleVersion</key>' '  <string>1</string>' '  <key>CFBundleShortVersionString</key>' '  <string>1.0</string>' '  <key>CFBundlePackageType</key>' '  <string>APPL</string>' '</dict>' '</plist>' > "$APP_DIR/Info.plist"
           fi
           echo '#!/bin/sh' > "$APP_DIR/dummy"
           echo 'echo "Hello from DummyApp"' >> "$APP_DIR/dummy"
@@ -152,6 +134,6 @@ PL
         uses: actions/upload-artifact@v4
         with:
           name: "${{ env.SCHEME }}-unsigned.ipa"
-          path: |
-            ${{ env.SCHEME }}-unsigned.ipa
-            DummyApp-unsigned.ipa
+          path:
+            - ${{ env.SCHEME }}-unsigned.ipa
+            - DummyApp-unsigned.ipa
