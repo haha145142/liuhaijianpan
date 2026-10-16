@@ -33,28 +33,63 @@ jobs:
           ls -la App || true
           echo "Project path: $PROJECT_PATH"
 
-      - name: xcodebuild -list
+      - name: Detect workspace vs project
+        id: detect
         run: |
           set -euo pipefail
-          echo "Running xcodebuild -list for project"
-          xcodebuild -project "$PROJECT_PATH" -list || true
+          PROJECT_OR_WORKSPACE=""
+          if ls App/*.xcworkspace >/dev/null 2>&1; then
+            PROJECT_OR_WORKSPACE=$(ls App/*.xcworkspace | head -n 1)
+            echo "Found workspace: $PROJECT_OR_WORKSPACE"
+            echo "USE_WORKSPACE=true" >> "$GITHUB_ENV"
+          else
+            PROJECT_OR_WORKSPACE="$PROJECT_PATH"
+            echo "No workspace found, using project: $PROJECT_OR_WORKSPACE"
+            echo "USE_WORKSPACE=false" >> "$GITHUB_ENV"
+          fi
+          echo "PROJECT_OR_WORKSPACE=$PROJECT_OR_WORKSPACE" >> "$GITHUB_ENV"
+          echo "PROJECT_OR_WORKSPACE=$PROJECT_OR_WORKSPACE"
+
+      - name: Show available schemes and build settings
+        run: |
+          set -euo pipefail
+          if [ "${USE_WORKSPACE:-false}" = "true" ]; then
+            echo "Listing workspace schemes for $PROJECT_OR_WORKSPACE"
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" -list || true
+            echo "Showing build settings (workspace)"
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -showBuildSettings || true
+          else
+            echo "Listing project schemes for $PROJECT_OR_WORKSPACE"
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" -list || true
+            echo "Showing build settings (project)"
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -showBuildSettings || true
+          fi
 
       - name: Archive (without code signing)
         id: archive
         run: |
+          # archive but never fail the job so we can always collect logs/artifacts
           set +e
-          echo "Archiving project: $PROJECT_PATH, scheme: $SCHEME"
-          xcodebuild -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="$BUILD_DIR" archive -archivePath "$BUILD_DIR/$SCHEME.xcarchive" 2>&1 | tee xcodebuild.log
-          status=${PIPESTATUS[0]}
+          echo "Archiving using: $PROJECT_OR_WORKSPACE (USE_WORKSPACE=${USE_WORKSPACE:-false}), scheme: $SCHEME"
+          if [ "${USE_WORKSPACE:-false}" = "true" ]; then
+            xcodebuild -workspace "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="$BUILD_DIR" archive -archivePath "$BUILD_DIR/$SCHEME.xcarchive" 2>&1 | tee xcodebuild.log
+            status=${PIPESTATUS[0]}
+          else
+            xcodebuild -project "$PROJECT_OR_WORKSPACE" -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO BUILD_DIR="$BUILD_DIR" archive -archivePath "$BUILD_DIR/$SCHEME.xcarchive" 2>&1 | tee xcodebuild.log
+            status=${PIPESTATUS[0]}
+          fi
           echo "xcodebuild exit status: $status"
-          echo "archive_status=$status" >> "$GITHUB_OUTPUT"
+          echo "archive_status=$status" >> "$GITHUB_OUTPUT" || true
+          # don't fail here; downstream will decide
           exit 0
 
       - name: Create unsigned .ipa or fallback dummy
         run: |
           set -euo pipefail
-          APP_PATH=$(find "$BUILD_DIR" -name "*.app" | head -n 1 || true)
+          # try to locate a built .app anywhere under BUILD_DIR
+          APP_PATH=$(find "$BUILD_DIR" -type d -name "*.app" | head -n 1 || true)
           if [ -n "$APP_PATH" ]; then
             echo "Found app at: $APP_PATH"
             mkdir -p Payload
@@ -70,8 +105,31 @@ jobs:
           APP_NAME="DummyApp"
           APP_DIR="build/${APP_NAME}.app"
           mkdir -p "$APP_DIR"
-          # Use repository Info.plist as a safe fallback to avoid embedding XML in the workflow YAML
-          cp -f App/JevJarvis/Info.plist "$APP_DIR/Info.plist" || true
+          # Prefer copying an existing Info.plist from the repo if present to avoid embedding large XML in YAML
+          if [ -f "App/JevJarvis/Info.plist" ]; then
+            cp -f "App/JevJarvis/Info.plist" "$APP_DIR/Info.plist" || true
+          else
+            cat > "$APP_DIR/Info.plist" <<'PL'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.example.dummy</string>
+  <key>CFBundleName</key>
+  <string>DummyApp</string>
+  <key>CFBundleExecutable</key>
+  <string>dummy</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+PL
+          fi
           echo '#!/bin/sh' > "$APP_DIR/dummy"
           echo 'echo "Hello from DummyApp"' >> "$APP_DIR/dummy"
           chmod +x "$APP_DIR/dummy"
